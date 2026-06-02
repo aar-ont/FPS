@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multiplayer Locked Cursor FPS</title>
+    <title>Fully Synchronized Multiplayer FPS</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; user-select: none; background-color: #05050a; }
         #blocker { position: absolute; width: 100%; height: 100%; background: rgba(10,10,15,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center; color: #fff; text-align: center; z-index: 10; cursor: pointer; }
@@ -13,8 +13,6 @@
         #crosshair::before { top: 7px; left: -2px; width: 20px; height: 2px; }
         #crosshair::after { top: -2px; left: 7px; width: 2px; height: 20px; }
         #hud { position: absolute; top: 20px; right: 20px; width: 240px; pointer-events: none; z-index: 5; background: rgba(10, 10, 15, 0.9); padding: 12px; border: 2px solid #00ffcc; border-radius: 6px; color: white; }
-        .bar-container { width: 100%; background: #333; height: 10px; margin-top: 4px; margin-bottom: 8px; border-radius: 2px; overflow: hidden; }
-        #ammo-display { font-size: 22px; font-weight: 900; color: #fff; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -23,18 +21,19 @@
 
     <div id="blocker">
         <div id="instructions">
-            <b style="font-size:26px; color:#00ffcc;">MULTIPLAYER FPS MODE</b><br/><br/>
-            Click anywhere to lock your mouse and connect.<br/><br/>
+            <b style="font-size:26px; color:#00ffcc;">WARZONE V5.0</b><br/><br/>
+            Click anywhere to lock cursor & drop in.<br/><br/>
             Move: <b>W, A, S, D</b><br/>
-            Aim: <b>Move Mouse Naturally</b><br/>
-            Shoot: <b>Left-Click</b>
+            Jump: <b>SPACEBAR</b><br/>
+            Shoot Bullets: <b>LEFT CLICK MOUSE</b><br/>
+            Aim: <b>Move Mouse Naturally</b>
         </div>
     </div>
 
     <div id="crosshair"></div>
     <div id="hud">
-        <div style="color: #ffcc00; font-weight: bold;">WEAPON: AR (AUTO)</div>
-        <div id="ammo-display">AMMO: 30 / 30</div>
+        <div style="color: #00ffcc; font-weight: bold; font-size: 18px;">MULTIPLAYER ACTIVE</div>
+        <div style="font-size: 12px; color: #aaa;">Press ESC to unlock cursor</div>
     </div>
 
     <script>
@@ -51,9 +50,13 @@
         const bullets = [], wallMeshes = [];
         let weaponGroup;
 
-        // Multiplayer Tracking Variables
+        // Networking
         let socket;
         let remotePlayers = {}; 
+        
+        // Weapon attributes
+        let fireRate = 150; // ms between shots
+        let lastShotTime = 0;
 
         init();
         animate();
@@ -72,13 +75,13 @@
             scene.add(camera);
             buildWeaponMesh();
 
-            // Lights
+            // Lighting
             scene.add(new THREE.AmbientLight(0xffffff, 0.6));
             const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
             dirLight.position.set(20, 40, 20);
             scene.add(dirLight);
 
-            // Floor & Grid
+            // Floor arena map
             const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE), new THREE.MeshStandardMaterial({ color: 0x111116 }));
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
@@ -86,7 +89,7 @@
             grid.position.y = 0.01;
             scene.add(grid);
 
-            // Boundaries
+            // Bounds
             const wallMat = new THREE.MeshStandardMaterial({ color: 0x1c1c24 });
             const nW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 8, 1), wallMat); nW.position.set(0, 4, -ARENA_SIZE/2); scene.add(nW); wallMeshes.push(nW);
             const sW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 8, 1), wallMat); sW.position.set(0, 4, ARENA_SIZE/2); scene.add(sW); wallMeshes.push(sW);
@@ -97,25 +100,20 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // --- NETWORKING ENGINE ---
-            // REPLACE THIS WITH YOUR RENDER LIVE SERVER URL:
-            socket = io("https://server-ezyk.onrender.com"); 
+            // --- NETWORKING SETUPS ---
+            // REPLACE THIS VALUE WITH YOUR ACTUAL DEPLOYED RENDER BACKEND LINK
+            socket = io("YOUR_RENDER_SERVER_URL_HERE"); 
 
-            // Spawn existing players when we join
             socket.on('currentPlayers', (players) => {
                 Object.keys(players).forEach((id) => {
-                    if (id !== socket.id) {
-                        createRemotePlayerMesh(id, players[id]);
-                    }
+                    if (id !== socket.id) createRemotePlayerMesh(id, players[id]);
                 });
             });
 
-            // Spawn a new player who just connected
             socket.on('newPlayer', (playerInfo) => {
                 createRemotePlayerMesh(playerInfo.id, playerInfo);
             });
 
-            // Update positions when someone else moves
             socket.on('playerMoved', (playerInfo) => {
                 if (remotePlayers[playerInfo.id]) {
                     remotePlayers[playerInfo.id].position.set(playerInfo.x, playerInfo.y, playerInfo.z);
@@ -123,7 +121,6 @@
                 }
             });
 
-            // Remove player model when they disconnect
             socket.on('playerDisconnected', (id) => {
                 if (remotePlayers[id]) {
                     scene.remove(remotePlayers[id]);
@@ -131,7 +128,12 @@
                 }
             });
 
-            // Pointer Lock Setup
+            // Listen for bullets fired by your friend
+            socket.on('remoteBulletFired', (bulletData) => {
+                spawnBulletMesh(bulletData.origin, bulletData.direction, bulletData.velocity, 0xff0055);
+            });
+
+            // Input Triggers
             blocker.addEventListener('click', () => { document.body.requestPointerLock(); });
             document.addEventListener('pointerlockchange', () => {
                 controlsLocked = (document.pointerLockElement === document.body);
@@ -141,31 +143,27 @@
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousedown', onMouseDown);
             window.addEventListener('resize', onWindowResize);
         }
 
-        // Generates the 3D representation of your friend's character
         function createRemotePlayerMesh(id, info) {
             const group = new THREE.Group();
-            
-            // Neon Purple Body Box
-            const bodyMat = new THREE.MeshStandardMaterial({ color: 0xcc00ff, roughness: 0.2 });
-            const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 3.2, 1.6), bodyMat);
-            body.position.y = 0; 
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 3.2, 1.6), new THREE.MeshStandardMaterial({ color: 0xcc00ff }));
+            body.position.y = 1.6; // Align to stand accurately on floor
             group.add(body);
 
-            // Visor so you know which way they are looking
             const visor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 0.4), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
-            visor.position.set(0, 1.0, -0.7);
+            visor.position.set(0, 2.6, -0.7);
             group.add(visor);
 
-            group.position.set(info.x, info.y, info.z);
+            group.position.set(info.x, info.y - 2.5, info.z); // offset camera height eye lines
             scene.add(group);
             remotePlayers[id] = group;
         }
 
         function buildWeaponMesh() {
-            const matMetal = new THREE.MeshStandardMaterial({ color: 0x0a0a0d, metalness: 0.8 });
+            const matMetal = new THREE.MeshStandardMaterial({ color: 0x222, metalness: 0.8 });
             const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.25), matMetal); receiver.position.set(0.15, -0.2, -0.3); weaponGroup.add(receiver);
             const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35), matMetal); barrel.rotation.x = Math.PI/2; barrel.position.set(0.15, -0.19, -0.55); weaponGroup.add(barrel);
         }
@@ -178,12 +176,55 @@
             camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
         }
 
+        function onMouseDown(event) {
+            if (!controlsLocked || event.button !== 0) return;
+            
+            const now = performance.now();
+            if (now - lastShotTime < fireRate) return;
+            lastShotTime = now;
+
+            // Generate direction vector based on player look angle
+            const camDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+            const bulletVelocity = 110; 
+            
+            // Define starting point slightly ahead of player camera
+            const originPoint = camera.position.clone().addScaledVector(camDirection, 0.5);
+
+            // Spawn local bullet element
+            spawnBulletMesh(originPoint, camDirection, bulletVelocity, 0x00ffcc);
+
+            // Send shot events straight out to server sockets
+            if (socket && socket.connected) {
+                socket.emit('shootBullet', {
+                    origin: { x: originPoint.x, y: originPoint.y, z: originPoint.z },
+                    direction: { x: camDirection.x, y: camDirection.y, z: camDirection.z },
+                    velocity: bulletVelocity
+                });
+            }
+        }
+
+        function spawnBulletMesh(origin, direction, speed, colorHex) {
+            const bMesh = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), new THREE.MeshBasicMaterial({ color: colorHex }));
+            bMesh.position.set(origin.x, origin.y, origin.z);
+            scene.add(bMesh);
+
+            bullets.push({
+                mesh: bMesh,
+                velocity: new THREE.Vector3(direction.x, direction.y, direction.z).multiplyScalar(speed),
+                aliveTime: 0
+            });
+        }
+
         function onKeyDown(event) {
             switch (event.code) {
                 case 'KeyW': moveForward = true; break;
                 case 'KeyA': moveLeft = true; break;
                 case 'KeyS': moveBackward = true; break;
                 case 'KeyD': moveRight = true; break;
+                case 'Space': 
+                    if (canJump) velocity.y += 13.5; // Upward impulse force
+                    canJump = false;
+                    break;
             }
         }
 
@@ -208,8 +249,12 @@
             const delta = (time - prevTime) / 1000;
 
             if (controlsLocked) {
+                // Movement damping
                 velocity.x -= velocity.x * 10.0 * delta;
                 velocity.z -= velocity.z * 10.0 * delta;
+                
+                // Gravity acceleration engine
+                velocity.y -= 9.81 * 3.8 * delta; 
 
                 const lookEuler = new THREE.Euler(0, yaw, 0, 'YXZ');
                 const forwardDirection = new THREE.Vector3(0, 0, -1).applyEuler(lookEuler);
@@ -223,7 +268,7 @@
                 const oldPosition = camera.position.clone();
                 camera.position.addScaledVector(velocity, delta);
 
-                // Wall Collisions
+                // Map Barrier Collisions
                 for (let m = 0; m < wallMeshes.length; m++) {
                     const wallBox = new THREE.Box3().setFromObject(wallMeshes[m]);
                     const playerBox = new THREE.Box3(
@@ -237,7 +282,14 @@
                     }
                 }
 
-                // BROADCAST LOCAL POSITION TO THE CENTRAL SERVER BRAIN
+                // Landing check physics logic 
+                if (camera.position.y < 2.5) {
+                    velocity.y = 0;
+                    camera.position.y = 2.5;
+                    canJump = true;
+                }
+
+                // Broadcast local coordinates to backend
                 if (socket && socket.connected) {
                     socket.emit('playerMovement', {
                         x: camera.position.x,
@@ -245,6 +297,19 @@
                         z: camera.position.z,
                         yaw: yaw
                     });
+                }
+            }
+
+            // Bullet flight mechanics tracking loop
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                const b = bullets[i];
+                b.mesh.position.addScaledVector(b.velocity, delta);
+                b.aliveTime += delta;
+
+                // Strip out old bullets or ground collisions after 3 seconds
+                if (b.aliveTime > 3.0 || b.mesh.position.y <= 0) {
+                    scene.remove(b.mesh);
+                    bullets.splice(i, 1);
                 }
             }
 
