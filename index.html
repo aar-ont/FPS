@@ -47,7 +47,7 @@
 
     <div id="blocker">
         <div id="instructions">
-            <b style="font-size:28px; color:#00ffcc;">TACTICAL SHOWDOWN v9.0</b><br/><br/>
+            <b style="font-size:28px; color:#00ffcc;">TACTICAL SHOWDOWN v9.5</b><br/><br/>
             Click anywhere to lock your mouse, enable audio, and connect.<br/><br/>
             Move: <b>W, A, S, D</b> | Jump: <b>SPACEBAR</b><br/>
             Switch Weapons: Keys <b>1, 2, 3, 4</b><br/>
@@ -96,7 +96,6 @@
         let lastShotTime = 0;
         let semiAutoShotFired = false;
 
-        // Synthesized Audio Controller
         let audioCtx = null;
 
         const weaponsConfig = {
@@ -128,7 +127,6 @@
             scene.add(camera);
             buildLocalWeaponMesh();
 
-            // --- BRIGHTER LIGHTING ENGINE ---
             scene.add(new THREE.AmbientLight(0xffffff, 0.9)); 
             const sun1 = new THREE.DirectionalLight(0xffffff, 1.0);
             sun1.position.set(30, 80, 30);
@@ -137,7 +135,6 @@
             sun2.position.set(-30, 40, -30);
             scene.add(sun2);
 
-            // Brighter Arena Floor
             const floorMat = new THREE.MeshStandardMaterial({ color: 0x222230, roughness: 0.4, metalness: 0.3 });
             const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE), floorMat);
             floor.rotation.x = -Math.PI / 2;
@@ -147,27 +144,26 @@
             grid.position.y = 0.01;
             scene.add(grid);
 
-            // Outer Boundary Arena Walls
+            // Outer Boundary Walls
             const barrierMat = new THREE.MeshStandardMaterial({ color: 0x33334c, roughness: 0.5 });
             const nW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 14, 2), barrierMat); nW.position.set(0, 7, -ARENA_SIZE/2); scene.add(nW); obstacleMeshes.push(nW);
             const sW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 14, 2), barrierMat); sW.position.set(0, 7, ARENA_SIZE/2); scene.add(sW); obstacleMeshes.push(sW);
             const eW = new THREE.Mesh(new THREE.BoxGeometry(2, 14, ARENA_SIZE), barrierMat); eW.position.set(ARENA_SIZE/2, 7, 0); scene.add(eW); obstacleMeshes.push(eW);
             const wW = new THREE.Mesh(new THREE.BoxGeometry(2, 14, ARENA_SIZE), barrierMat); wW.position.set(-ARENA_SIZE/2, 7, 0); scene.add(wW); obstacleMeshes.push(wW);
 
-            // --- GENERATE TACTICAL INTERIOR OBSTACLES ---
+            // Interior obstacle pillars
             buildObstacleBlock(15, 10, 15, -20, 5, -20);
             buildObstacleBlock(15, 10, 15, 20, 5, 20);
             buildObstacleBlock(20, 8, 6, 0, 4, -30);
             buildObstacleBlock(20, 8, 6, 0, 4, 30);
             buildObstacleBlock(6, 12, 20, -30, 6, 0);
             buildObstacleBlock(6, 12, 20, 30, 6, 0);
-            buildObstacleBlock(10, 14, 10, 0, 7, 0); // Center pillar
+            buildObstacleBlock(10, 14, 10, 0, 7, 0);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // --- DEPLOYED BACKEND SERVER LINK ---
             socket = io("https://server-ezyk.onrender.com"); 
 
             activateInvincibilityShield();
@@ -195,9 +191,7 @@
                     if (head) head.rotation.x = pInfo.pitch;
                     
                     const shieldMesh = remote.getObjectByName("spawnShieldBubble");
-                    if (shieldMesh) {
-                        shieldMesh.visible = !!pInfo.isShieldActive;
-                    }
+                    if (shieldMesh) shieldMesh.visible = !!pInfo.isShieldActive;
                 }
             });
 
@@ -231,7 +225,7 @@
 
             socket.on('remoteBulletFired', (bData) => {
                 spawnBulletMesh(bData.origin, bData.direction, bData.velocity, bData.color, bData.bSize, bData.playerId);
-                playSynthSound(bData.soundType, 0.4);
+                playSynthSound(bData.soundType, bData.soundType === 'shotgun' ? 1.0 : 0.4);
             });
 
             blocker.addEventListener('click', () => { 
@@ -279,7 +273,6 @@
             let validSpawn = false;
             let randX = 0, randZ = 0;
 
-            // Spawn loop checker to verify player isn't inside walls
             while(!validSpawn) {
                 randX = (Math.random() - 0.5) * range * 2;
                 randZ = (Math.random() - 0.5) * range * 2;
@@ -289,7 +282,7 @@
                     const oBox = new THREE.Box3().setFromObject(obstacleMeshes[m]);
                     const pBox = new THREE.Box3(
                         new THREE.Vector3(randX - PLAYER_RADIUS, 0, randZ - PLAYER_RADIUS),
-                        new THREE.Vector3(randX + PLAYER_RADIUS, 10, randZ + PLAYER_RADIUS)
+                        new THREE.Vector3(randX + PLAYER_RADIUS, 12, randZ + PLAYER_RADIUS)
                     );
                     if (oBox.intersectsBox(pBox)) {
                         validSpawn = false;
@@ -299,6 +292,20 @@
             }
             camera.position.set(randX, 2.5, randZ);
             velocity.set(0, 0, 0);
+        }
+
+        function checkCollisionAtPosition(posX, posZ) {
+            const playerBox = new THREE.Box3(
+                new THREE.Vector3(posX - PLAYER_RADIUS, 0, posZ - PLAYER_RADIUS),
+                new THREE.Vector3(posX + PLAYER_RADIUS, 12, posZ + PLAYER_RADIUS)
+            );
+            for (let m = 0; m < obstacleMeshes.length; m++) {
+                const oBox = new THREE.Box3().setFromObject(obstacleMeshes[m]);
+                if (oBox.intersectsBox(playerBox)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         function activateInvincibilityShield() {
@@ -383,7 +390,6 @@
 
             const flashMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
             
-            // Fixed: Safely store original textures without over-writing from shotgun pellet overlap frames
             if (!remote.userData.isFlashed) {
                 remote.userData.originalMaterials = [];
                 remote.traverse((child) => {
@@ -395,7 +401,6 @@
                 remote.userData.isFlashed = true;
             }
 
-            // Continuous hit refresh protection
             if (remote.userData.flashTimeout) clearTimeout(remote.userData.flashTimeout);
 
             remote.userData.flashTimeout = setTimeout(() => {
@@ -522,12 +527,9 @@
             gunRecoilZ = 0.15; 
 
             const camDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-            
-            // FIXED: Spawn bullet origin exactly from your face, tracking straight backwards 
-            // via Raycasting steps for accurate zero-range hit registration.
             const spawnOrigin = camera.position.clone();
 
-            playSynthSound(cfg.sound, 0.7);
+            playSynthSound(cfg.sound, cfg.sound === 'shotgun' ? 1.4 : 0.7);
 
             for (let i = 0; i < cfg.count; i++) {
                 let currentDir = camDirection.clone();
@@ -622,7 +624,7 @@
             }
         }
 
-        // --- WEB AUDIO API REAL-TIME SYNTH ENGINE ---
+        // --- WEB AUDIO API ENGINE ---
         function playSynthSound(type, volume = 0.5) {
             if (!audioCtx) return;
             
@@ -642,12 +644,28 @@
                 osc.start(now); osc.stop(now + 0.08);
             } 
             else if (type === 'shotgun') {
-                osc.type = 'triangle';
-                osc.frequency.setValueAtTime(120, now);
-                osc.frequency.exponentialRampToValueAtTime(20, now + 0.15);
+                // HEAVIER, LAYERED SHOTGUN SYNTH POP
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(180, now);
+                osc.frequency.linearRampToValueAtTime(30, now + 0.22);
+                
+                // Secondary low-end bass boom oscillator
+                const subOsc = audioCtx.createOscillator();
+                const subGain = audioCtx.createGain();
+                subOsc.type = 'triangle';
+                subOsc.frequency.setValueAtTime(90, now);
+                subOsc.frequency.linearRampToValueAtTime(10, now + 0.25);
+                
+                subOsc.connect(subGain);
+                subGain.connect(audioCtx.destination);
+                
                 gainNode.gain.setValueAtTime(volume, now);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, now + 0.15);
-                osc.start(now); osc.stop(now + 0.15);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+                subGain.gain.setValueAtTime(volume * 1.2, now);
+                subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                
+                osc.start(now); osc.stop(now + 0.22);
+                subOsc.start(now); subOsc.stop(now + 0.25);
             } 
             else if (type === 'sniper') {
                 osc.type = 'sawtooth';
@@ -747,21 +765,25 @@
                 if (moveLeft) velocity.addScaledVector(rightDirection, -155.0 * delta);
                 if (moveRight) velocity.addScaledVector(rightDirection, 155.0 * delta);
 
-                const oldPosition = camera.position.clone();
-                camera.position.addScaledVector(velocity, delta);
+                // --- SMOOTH WALL SLIDING ENGINE ---
+                // Calculate position increment step for this frame
+                const stepX = velocity.x * delta;
+                const stepZ = velocity.z * delta;
 
-                // Player Box Collision against Arena Walls & Layout Obstacles
-                for (let m = 0; m < obstacleMeshes.length; m++) {
-                    const oBox = new THREE.Box3().setFromObject(obstacleMeshes[m]);
-                    const playerBox = new THREE.Box3(
-                        new THREE.Vector3(camera.position.x - PLAYER_RADIUS, 0, camera.position.z - PLAYER_RADIUS),
-                        new THREE.Vector3(camera.position.x + PLAYER_RADIUS, 12, camera.position.z + PLAYER_RADIUS)
-                    );
-                    if (oBox.intersectsBox(playerBox)) {
-                        camera.position.x = oldPosition.x;
-                        camera.position.z = oldPosition.z;
-                        break;
-                    }
+                // Try moving along X-axis independently
+                const nextX = camera.position.x + stepX;
+                if (!checkCollisionAtPosition(nextX, camera.position.z)) {
+                    camera.position.x = nextX;
+                } else {
+                    velocity.x = 0; // Block X velocity upon hitting X-facing wall surface
+                }
+
+                // Try moving along Z-axis independently
+                const nextZ = camera.position.z + stepZ;
+                if (!checkCollisionAtPosition(camera.position.x, nextZ)) {
+                    camera.position.z = nextZ;
+                } else {
+                    velocity.z = 0; // Block Z velocity upon hitting Z-facing wall surface
                 }
 
                 if (camera.position.y < 2.5) {
@@ -773,21 +795,19 @@
                 broadcastMovementPacket();
             }
 
-            // ADVANCED BULLET PHYSICS ENGINE WITH continuous-raycast collision
+            // Bullet Engine Raycasting Pipeline
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 b.lastPosition.copy(b.mesh.position);
                 b.mesh.position.addScaledVector(b.velocity, delta);
                 b.aliveTime += delta;
 
-                // Create a continuous movement vector between frames to ensure zero-distance hit registration
                 const movementVec = b.mesh.position.clone().sub(b.lastPosition);
                 const movementDist = movementVec.length();
                 const movementDir = movementVec.clone().normalize();
 
                 let bulletTerminated = false;
 
-                // 1. Raycast Check against solid Arena Obstacles
                 if (movementDist > 0.001) {
                     const ray = new THREE.Raycaster(b.lastPosition, movementDir, 0, movementDist);
                     const wallIntersects = ray.intersectObjects(obstacleMeshes);
@@ -799,7 +819,6 @@
                     }
                 }
 
-                // 2. High-Precision Check against Remote Enemy Hitboxes
                 if (b.ownerId === socket.id && b.damage > 0) {
                     const targets = Object.keys(remotePlayers);
                     for (let t = 0; t < targets.length; t++) {
@@ -808,7 +827,6 @@
                         if (targetPlayer) {
                             const enemyCore = new THREE.Vector3(targetPlayer.position.x, targetPlayer.position.y + 1.6, targetPlayer.position.z);
                             
-                            // Check distance along the continuous trajectory line
                             const bToEnemy = enemyCore.clone().sub(b.lastPosition);
                             const projection = bToEnemy.dot(movementDir);
                             
@@ -839,7 +857,6 @@
                 }
             }
 
-            // Spin remote shields visually
             Object.keys(remotePlayers).forEach((id) => {
                 const remote = remotePlayers[id];
                 if (remote) {
