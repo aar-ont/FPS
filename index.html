@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Synchronized Multi-Weapon Tactical FPS</title>
+    <title>Tactical Multi-Weapon Shooter</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; user-select: none; background-color: #05050a; }
         #blocker { position: absolute; width: 100%; height: 100%; background: rgba(5,5,10,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; color: #fff; text-align: center; z-index: 10; cursor: pointer; }
@@ -13,7 +13,6 @@
         #crosshair::before { top: 7px; left: -2px; width: 20px; height: 2px; }
         #crosshair::after { top: -2px; left: 7px; width: 2px; height: 20px; }
         
-        /* HUD and Health Bar Styling */
         #hud { position: absolute; top: 20px; right: 20px; width: 260px; pointer-events: none; z-index: 5; background: rgba(10, 10, 15, 0.95); padding: 15px; border: 2px solid #00ffcc; border-radius: 6px; color: white; }
         #ammo-display { font-size: 24px; font-weight: 900; color: #fff; margin-top: 5px; }
         #reload-msg { color: #ff9500; font-weight: bold; display: none; font-size: 14px; }
@@ -44,7 +43,6 @@
         <div id="ammo-display">AMMO: 30 / 30</div>
         <div id="reload-msg">RELOADING...</div>
         
-        <!-- Health Bar Elements -->
         <div id="health-text">HEALTH: 100 HP</div>
         <div class="health-container">
             <div id="health-bar"></div>
@@ -103,13 +101,11 @@
             scene.add(camera);
             buildLocalWeaponMesh();
 
-            // Lighting
             scene.add(new THREE.AmbientLight(0xffffff, 0.4));
             const sun = new THREE.DirectionalLight(0xffffff, 0.7);
             sun.position.set(30, 60, 30);
             scene.add(sun);
 
-            // Level Floor Architecture
             const floorMat = new THREE.MeshStandardMaterial({ color: 0x121216, roughness: 0.7, metalness: 0.2 });
             const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE), floorMat);
             floor.rotation.x = -Math.PI / 2;
@@ -119,7 +115,6 @@
             grid.position.y = 0.01;
             scene.add(grid);
 
-            // Structural Outer Enclosures
             const barrierMat = new THREE.MeshStandardMaterial({ color: 0x1a1a24, roughness: 0.5 });
             const nW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 10, 1), barrierMat); nW.position.set(0, 5, -ARENA_SIZE/2); scene.add(nW); wallMeshes.push(nW);
             const sW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 10, 1), barrierMat); sW.position.set(0, 5, ARENA_SIZE/2); scene.add(sW); wallMeshes.push(sW);
@@ -130,8 +125,8 @@
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // --- NETWORKING LOGIC PIPELINE ---
-            socket = io("YOUR_RENDER_SERVER_URL_HERE"); 
+            // --- DEPLOYED BACKEND SERVER LINK ---
+            socket = io("https://server-ezyk.onrender.com"); 
 
             socket.on('currentPlayers', (players) => {
                 Object.keys(players).forEach((id) => {
@@ -158,7 +153,6 @@
                 if (remote) updateRemotePlayerWeaponMesh(remote, data.currentWeapon);
             });
 
-            // Triggered when any player's health drops
             socket.on('healthUpdated', (data) => {
                 if (data.id === socket.id) {
                     localHealth = data.health;
@@ -166,10 +160,8 @@
                 }
             });
 
-            // Triggered when someone dies
             socket.on('playerKilled', (data) => {
                 if (data.targetId === socket.id) {
-                    // You died! Respawn at a random location
                     localHealth = 100;
                     camera.position.set((Math.random() - 0.5) * 40, 2.5, (Math.random() - 0.5) * 40);
                     updateHealthHUD();
@@ -188,7 +180,6 @@
                 spawnBulletMesh(bData.origin, bData.direction, bData.velocity, bData.color, bData.bSize, bData.playerId);
             });
 
-            // Browser Listeners
             blocker.addEventListener('click', () => { document.body.requestPointerLock(); });
             document.addEventListener('pointerlockchange', () => {
                 controlsLocked = (document.pointerLockElement === document.body);
@@ -213,12 +204,10 @@
             const matUndersuit = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.8 });
             const matVisor = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
 
-            // Torso Base
             const torso = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.6, 0.8), matArmor);
             torso.position.y = 1.7;
             playerGroup.add(torso);
 
-            // Combat Leg Structures
             const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 1.8), matUndersuit);
             leftLeg.position.set(-0.4, 0.9, 0);
             playerGroup.add(leftLeg);
@@ -227,7 +216,6 @@
             rightLeg.position.set(0.4, 0.9, 0);
             playerGroup.add(rightLeg);
 
-            // Tactical Arm Bracers
             const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 1.5), matArmor);
             leftArm.position.set(-0.9, 2.0, -0.2);
             leftArm.rotation.x = -Math.PI / 6;
@@ -238,7 +226,6 @@
             rightArm.rotation.x = -Math.PI / 3;
             playerGroup.add(rightArm);
 
-            // Head Node structure
             const headContainer = new THREE.Group();
             headContainer.name = "headSystem";
             headContainer.position.set(0, 2.7, 0);
@@ -260,7 +247,6 @@
             playerGroup.position.set(info.x, info.y - 2.5, info.z);
             scene.add(playerGroup);
             
-            // Storing the player id inside the mesh container for raycast damage checks
             playerGroup.userData = { id: id };
             remotePlayers[id] = playerGroup;
 
@@ -389,7 +375,6 @@
                     currentDir.normalize();
                 }
 
-                // Fire local bullet tracking asset
                 spawnBulletMesh(spawnOrigin, currentDir, cfg.velocity, cfg.color, cfg.bSize, socket.id, cfg.damage);
 
                 if (socket && socket.connected) {
@@ -512,24 +497,19 @@
                 }
             }
 
-            // --- HIT DETECTION MECHANICS LOOP ---
+            // Hit Detection Pipeline
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 b.mesh.position.addScaledVector(b.velocity, delta);
                 b.aliveTime += delta;
 
-                // Hit calculations: Check if our local bullets collide with remote avatars
                 if (b.ownerId === socket.id && b.damage > 0) {
                     Object.keys(remotePlayers).forEach((id) => {
                         const targetPlayer = remotePlayers[id];
                         if (targetPlayer) {
-                            // Simple distance-based 3D bounding sphere hit registration calculation
                             const dist = b.mesh.position.distanceTo(new THREE.Vector3(targetPlayer.position.x, targetPlayer.position.y + 1.6, targetPlayer.position.z));
                             if (dist < 1.5) { 
-                                // Direct hit registered! Signal backend engine to reduce health attributes
                                 socket.emit('playerHit', { targetId: id, damage: b.damage });
-                                
-                                // Delete bullet element asset locally
                                 scene.remove(b.mesh);
                                 bullets.splice(i, 1);
                                 return;
@@ -538,7 +518,6 @@
                     });
                 }
 
-                // Strip out dead bullets
                 if (bullets[i] && (b.aliveTime > 2.5 || b.mesh.position.y <= 0)) {
                     scene.remove(b.mesh);
                     bullets.splice(i, 1);
