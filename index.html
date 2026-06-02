@@ -39,7 +39,6 @@
 
     <div id="damage-overlay"></div>
     
-    <!-- Respawn Panel Menu -->
     <div id="death-screen">
         <div id="death-box">
             <h1 style="margin: 0; font-size: 36px; letter-spacing: 2px; color: #ff3b30;">YOU WERE ELIMINATED</h1>
@@ -50,7 +49,7 @@
 
     <div id="blocker">
         <div id="instructions">
-            <b style="font-size:28px; color:#ffcc00;">TACTICAL SHOWDOWN v8.0</b><br/><br/>
+            <b style="font-size:28px; color:#ffcc00;">TACTICAL SHOWDOWN v8.5</b><br/><br/>
             Click anywhere to lock your mouse and connect.<br/><br/>
             Move: <b>W, A, S, D</b> | Jump: <b>SPACEBAR</b><br/>
             Switch Weapons: Keys <b>1, 2, 3, 4</b><br/>
@@ -121,7 +120,6 @@
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             
-            // Random Initial Spawn Location Setup
             assignRandomSpawnCoordinates();
 
             weaponGroup = new THREE.Group();
@@ -156,17 +154,21 @@
             // --- DEPLOYED BACKEND SERVER LINK ---
             socket = io("https://server-ezyk.onrender.com"); 
 
-            // Activate initial invincibility shield upon logging in
             activateInvincibilityShield();
 
             socket.on('currentPlayers', (players) => {
                 Object.keys(players).forEach((id) => {
-                    if (id !== socket.id) createRealisticRemotePlayer(id, players[id]);
+                    // Only render players who are alive (health > 0)
+                    if (id !== socket.id && players[id].health > 0) {
+                        createRealisticRemotePlayer(id, players[id]);
+                    }
                 });
             });
 
             socket.on('newPlayer', (pInfo) => {
-                createRealisticRemotePlayer(pInfo.id, pInfo);
+                if (pInfo.health > 0) {
+                    createRealisticRemotePlayer(pInfo.id, pInfo);
+                }
             });
 
             socket.on('playerMoved', (pInfo) => {
@@ -177,7 +179,6 @@
                     const head = remote.getObjectByName("headSystem");
                     if (head) head.rotation.x = pInfo.pitch;
                     
-                    // Keep shield mesh sync tracking updated visually
                     const shieldMesh = remote.getObjectByName("spawnShieldBubble");
                     if (shieldMesh) {
                         shieldMesh.visible = !!pInfo.isShieldActive;
@@ -201,16 +202,18 @@
             });
 
             socket.on('playerKilled', (data) => {
+                // If YOU died
                 if (data.targetId === socket.id) {
                     processLocalDeathSequence();
+                } 
+                // If SOMEONE ELSE died, wipe their model off your screen immediately
+                else {
+                    removeRemotePlayerFromScene(data.targetId);
                 }
             });
 
             socket.on('playerDisconnected', (id) => {
-                if (remotePlayers[id]) {
-                    scene.remove(remotePlayers[id]);
-                    delete remotePlayers[id];
-                }
+                removeRemotePlayerFromScene(id);
             });
 
             socket.on('remoteBulletFired', (bData) => {
@@ -238,7 +241,6 @@
         }
 
         function assignRandomSpawnCoordinates() {
-            // Keep safe spawning margins away from outer barriers (Boundary: half of 90 size)
             const range = (ARENA_SIZE / 2) - 5; 
             const randX = (Math.random() - 0.5) * range * 2;
             const randZ = (Math.random() - 0.5) * range * 2;
@@ -250,7 +252,6 @@
             isInvincible = true;
             document.getElementById('shield-indicator').style.display = "block";
             
-            // Notify other players across server pipeline that shield state is active
             broadcastMovementPacket();
 
             setTimeout(() => {
@@ -264,6 +265,10 @@
             isDead = true;
             mouseButtonDown = false;
             document.exitPointerLock();
+            
+            // Hide your own held gun model immediately so your viewport feels completely empty/dead
+            weaponGroup.visible = false;
+            
             deathScreen.style.display = "flex";
         }
 
@@ -273,14 +278,27 @@
             updateHealthHUD();
             
             deathScreen.style.display = "none";
+            
+            // Re-render your weapon mesh view
+            weaponGroup.visible = true;
+            
             assignRandomSpawnCoordinates();
             activateInvincibilityShield();
             
-            // Re-lock mouse to instantly hop back into action
             document.body.requestPointerLock();
         }
 
+        function removeRemotePlayerFromScene(id) {
+            if (remotePlayers[id]) {
+                scene.remove(remotePlayers[id]);
+                delete remotePlayers[id];
+            }
+        }
+
         function createRealisticRemotePlayer(id, info) {
+            // Safety: Make sure we aren't doubling up meshes
+            removeRemotePlayerFromScene(id);
+
             const playerGroup = new THREE.Group();
 
             const matArmor = new THREE.MeshStandardMaterial({ color: 0x2e3138, roughness: 0.5, metalness: 0.6 });
@@ -327,7 +345,6 @@
             weaponHolder.position.set(0.5, 1.8, -0.4);
             playerGroup.add(weaponHolder);
 
-            // Construct visual 3D shield bubble for remote tracked players
             const shieldGeo = new THREE.SphereGeometry(1.8, 16, 16);
             const shieldMat = new THREE.MeshBasicMaterial({ color: 0x00ffcc, wireframe: true, transparent: true, opacity: 0.25 });
             const shieldMesh = new THREE.Mesh(shieldGeo, shieldMat);
@@ -567,7 +584,7 @@
                     z: camera.position.z,
                     yaw: yaw,
                     pitch: pitch,
-                    isShieldActive: isInvincible // Inform server if we are currently immune
+                    isShieldActive: isInvincible 
                 });
             }
         }
@@ -621,7 +638,7 @@
                 broadcastMovementPacket();
             }
 
-            // Hit Detection Processing Logic Loop
+            // Hit Detection Engine Pipeline
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 b.mesh.position.addScaledVector(b.velocity, delta);
@@ -633,7 +650,6 @@
                         if (targetPlayer) {
                             const dist = b.mesh.position.distanceTo(new THREE.Vector3(targetPlayer.position.x, targetPlayer.position.y + 1.6, targetPlayer.position.z));
                             if (dist < 1.5) { 
-                                // Send hit confirmation ONLY if the target isn't shielding (checked via local simulation variable check)
                                 socket.emit('playerHit', { targetId: id, damage: b.damage });
                                 scene.remove(b.mesh);
                                 bullets.splice(i, 1);
@@ -649,7 +665,6 @@
                 }
             }
 
-            // Animate remote wireframe shields to spin if visible
             Object.keys(remotePlayers).forEach((id) => {
                 const remote = remotePlayers[id];
                 if (remote) {
