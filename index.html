@@ -118,7 +118,7 @@
             document.body.appendChild(renderer.domElement);
 
             // --- NETWORKING LOGIC PIPELINE ---
-            socket = io("YOUR_RENDER_SERVER_URL_HERE"); 
+            socket = io("https://server-ezyk.onrender.com"); 
 
             socket.on('currentPlayers', (players) => {
                 Object.keys(players).forEach((id) => {
