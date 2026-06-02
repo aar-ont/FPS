@@ -3,16 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fully Synchronized Multiplayer FPS</title>
+    <title>Synchronized Multi-Weapon Tactical FPS</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', sans-serif; user-select: none; background-color: #05050a; }
-        #blocker { position: absolute; width: 100%; height: 100%; background: rgba(10,10,15,0.85); display: flex; flex-direction: column; justify-content: center; align-items: center; color: #fff; text-align: center; z-index: 10; cursor: pointer; }
-        #instructions { background: #151520; padding: 30px; border-radius: 8px; border: 2px solid #00ffcc; box-shadow: 0 0 20px rgba(0, 255, 204, 0.3); max-width: 400px; pointer-events: none; }
+        #blocker { position: absolute; width: 100%; height: 100%; background: rgba(5,5,10,0.9); display: flex; flex-direction: column; justify-content: center; align-items: center; color: #fff; text-align: center; z-index: 10; cursor: pointer; }
+        #instructions { background: #11111a; padding: 35px; border-radius: 10px; border: 2px solid #ffcc00; box-shadow: 0 0 25px rgba(255, 204, 0, 0.2); max-width: 450px; pointer-events: none; }
         #crosshair { position: absolute; top: 50%; left: 50%; width: 16px; height: 16px; transform: translate(-50%, -50%); pointer-events: none; z-index: 5; }
         #crosshair::before, #crosshair::after { content: ''; position: absolute; background: #00ffcc; }
         #crosshair::before { top: 7px; left: -2px; width: 20px; height: 2px; }
         #crosshair::after { top: -2px; left: 7px; width: 2px; height: 20px; }
-        #hud { position: absolute; top: 20px; right: 20px; width: 240px; pointer-events: none; z-index: 5; background: rgba(10, 10, 15, 0.9); padding: 12px; border: 2px solid #00ffcc; border-radius: 6px; color: white; }
+        #hud { position: absolute; top: 20px; right: 20px; width: 260px; pointer-events: none; z-index: 5; background: rgba(10, 10, 15, 0.95); padding: 15px; border: 2px solid #00ffcc; border-radius: 6px; color: white; }
+        #ammo-display { font-size: 24px; font-weight: 900; color: #fff; margin-top: 5px; }
+        #reload-msg { color: #ff9500; font-weight: bold; display: none; font-size: 14px; }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
@@ -21,19 +23,20 @@
 
     <div id="blocker">
         <div id="instructions">
-            <b style="font-size:26px; color:#00ffcc;">WARZONE V5.0</b><br/><br/>
-            Click anywhere to lock cursor & drop in.<br/><br/>
-            Move: <b>W, A, S, D</b><br/>
-            Jump: <b>SPACEBAR</b><br/>
-            Shoot Bullets: <b>LEFT CLICK MOUSE</b><br/>
-            Aim: <b>Move Mouse Naturally</b>
+            <b style="font-size:28px; color:#ffcc00;">TACTICAL SHOWDOWN v6.0</b><br/><br/>
+            Click anywhere to lock your mouse and connect.<br/><br/>
+            Move: <b>W, A, S, D</b> | Jump: <b>SPACEBAR</b><br/>
+            Switch Weapons: Keys <b>1, 2, 3, 4</b><br/>
+            Shoot Weapon: <b>LEFT CLICK</b><br/>
+            Reload Manual: <b>R</b>
         </div>
     </div>
 
     <div id="crosshair"></div>
     <div id="hud">
-        <div style="color: #00ffcc; font-weight: bold; font-size: 18px;">MULTIPLAYER ACTIVE</div>
-        <div style="font-size: 12px; color: #aaa;">Press ESC to unlock cursor</div>
+        <div id="weapon-display" style="color: #ffcc00; font-weight: bold; font-size: 14px;">WEAPON: AR (AUTO)</div>
+        <div id="ammo-display">AMMO: 30 / 30</div>
+        <div id="reload-msg">RELOADING...</div>
     </div>
 
     <script>
@@ -45,18 +48,29 @@
         let controlsLocked = false;
         let pitch = 0, yaw = 0;
 
-        const ARENA_SIZE = 80; 
-        const PLAYER_RADIUS = 1.2;
+        const ARENA_SIZE = 90; 
+        const PLAYER_RADIUS = 1.3;
         const bullets = [], wallMeshes = [];
         let weaponGroup;
 
-        // Networking
+        // Multiplayer Systems
         let socket;
         let remotePlayers = {}; 
         
-        // Weapon attributes
-        let fireRate = 150; // ms between shots
+        let currentWeapon = 1;
+        let isReloading = false;
+        let mouseButtonDown = false;
         let lastShotTime = 0;
+        let semiAutoShotFired = false;
+
+        const weaponsConfig = {
+            1: { name: "M4A1 CARBINE", color: 0x00ffff, velocity: 140, damage: 15, count: 1, maxAmmo: 30, currentAmmo: 30, reloadTime: 1300, fireRate: 110, auto: true, bSize: 0.16 },
+            2: { name: "TACTICAL SHOTGUN", color: 0xff3b30, velocity: 95, damage: 12, count: 6, maxAmmo: 6, currentAmmo: 6, reloadTime: 2200, fireRate: 650, auto: false, bSize: 0.12 },
+            3: { name: ".50 CAL SNIPER", color: 0xffcc00, velocity: 260, damage: 90, count: 1, maxAmmo: 5, currentAmmo: 5, reloadTime: 2800, fireRate: 1000, auto: false, bSize: 0.28 },
+            4: { name: "PLASMA BEAMER", color: 0xcc00ff, velocity: 65, damage: 35, count: 1, maxAmmo: 12, currentAmmo: 12, reloadTime: 1600, fireRate: 200, auto: true, bSize: 0.45 }
+        };
+
+        let gunRecoilZ = 0;
 
         init();
         animate();
@@ -65,60 +79,74 @@
             blocker = document.getElementById('blocker');
 
             scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x05050a);
+            scene.background = new THREE.Color(0x020205);
+            scene.fog = new THREE.FogExp2(0x020205, 0.015);
 
             camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
-            camera.position.set(0, 2.5, ARENA_SIZE / 2 - 5);
+            camera.position.set(0, 2.5, 35);
 
             weaponGroup = new THREE.Group();
             camera.add(weaponGroup);
             scene.add(camera);
-            buildWeaponMesh();
+            buildLocalWeaponMesh();
 
             // Lighting
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-            dirLight.position.set(20, 40, 20);
-            scene.add(dirLight);
+            scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+            const sun = new THREE.DirectionalLight(0xffffff, 0.7);
+            sun.position.set(30, 60, 30);
+            scene.add(sun);
 
-            // Floor arena map
-            const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE), new THREE.MeshStandardMaterial({ color: 0x111116 }));
+            // Level Floor Architecture
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x121216, roughness: 0.7, metalness: 0.2 });
+            const floor = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_SIZE, ARENA_SIZE), floorMat);
             floor.rotation.x = -Math.PI / 2;
             scene.add(floor);
-            const grid = new THREE.GridHelper(ARENA_SIZE, ARENA_SIZE / 2, 0x00ffcc, 0x222233);
+            
+            const grid = new THREE.GridHelper(ARENA_SIZE, ARENA_SIZE / 3, 0x00ffcc, 0x14141f);
             grid.position.y = 0.01;
             scene.add(grid);
 
-            // Bounds
-            const wallMat = new THREE.MeshStandardMaterial({ color: 0x1c1c24 });
-            const nW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 8, 1), wallMat); nW.position.set(0, 4, -ARENA_SIZE/2); scene.add(nW); wallMeshes.push(nW);
-            const sW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 8, 1), wallMat); sW.position.set(0, 4, ARENA_SIZE/2); scene.add(sW); wallMeshes.push(sW);
-            const eW = new THREE.Mesh(new THREE.BoxGeometry(1, 8, ARENA_SIZE), wallMat); eW.position.set(ARENA_SIZE/2, 4, 0); scene.add(eW); wallMeshes.push(eW);
-            const wW = new THREE.Mesh(new THREE.BoxGeometry(1, 8, ARENA_SIZE), wallMat); wW.position.set(-ARENA_SIZE/2, 4, 0); scene.add(wW); wallMeshes.push(wW);
+            // Structural Outer Enclosures
+            const barrierMat = new THREE.MeshStandardMaterial({ color: 0x1a1a24, roughness: 0.5 });
+            const nW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 10, 1), barrierMat); nW.position.set(0, 5, -ARENA_SIZE/2); scene.add(nW); wallMeshes.push(nW);
+            const sW = new THREE.Mesh(new THREE.BoxGeometry(ARENA_SIZE, 10, 1), barrierMat); sW.position.set(0, 5, ARENA_SIZE/2); scene.add(sW); wallMeshes.push(sW);
+            const eW = new THREE.Mesh(new THREE.BoxGeometry(1, 10, ARENA_SIZE), barrierMat); eW.position.set(ARENA_SIZE/2, 5, 0); scene.add(eW); wallMeshes.push(eW);
+            const wW = new THREE.Mesh(new THREE.BoxGeometry(1, 10, ARENA_SIZE), barrierMat); wW.position.set(-ARENA_SIZE/2, 5, 0); scene.add(wW); wallMeshes.push(wW);
 
             renderer = new THREE.WebGLRenderer({ antialias: true });
             renderer.setSize(window.innerWidth, window.innerHeight);
             document.body.appendChild(renderer.domElement);
 
-            // --- NETWORKING SETUPS ---
-            // REPLACE THIS VALUE WITH YOUR ACTUAL DEPLOYED RENDER BACKEND LINK
+            // --- NETWORKING LOGIC PIPELINE ---
             socket = io("YOUR_RENDER_SERVER_URL_HERE"); 
 
             socket.on('currentPlayers', (players) => {
                 Object.keys(players).forEach((id) => {
-                    if (id !== socket.id) createRemotePlayerMesh(id, players[id]);
+                    if (id !== socket.id) createRealisticRemotePlayer(id, players[id]);
                 });
             });
 
-            socket.on('newPlayer', (playerInfo) => {
-                createRemotePlayerMesh(playerInfo.id, playerInfo);
+            socket.on('newPlayer', (pInfo) => {
+                createRealisticRemotePlayer(pInfo.id, pInfo);
             });
 
-            socket.on('playerMoved', (playerInfo) => {
-                if (remotePlayers[playerInfo.id]) {
-                    remotePlayers[playerInfo.id].position.set(playerInfo.x, playerInfo.y, playerInfo.z);
-                    remotePlayers[playerInfo.id].rotation.y = playerInfo.yaw;
+            socket.on('playerMoved', (pInfo) => {
+                const remote = remotePlayers[pInfo.id];
+                if (remote) {
+                    remote.position.set(pInfo.x, pInfo.y - 2.5, pInfo.z); // Offset camera baseline height
+                    
+                    // Separate body torso rotation from pitch look angle
+                    remote.rotation.y = pInfo.yaw;
+                    
+                    // Tilt upper helmet system to reflect look pitch angles
+                    const head = remote.getObjectByName("headSystem");
+                    if (head) head.rotation.x = pInfo.pitch;
                 }
+            });
+
+            socket.on('remoteWeaponChanged', (data) => {
+                const remote = remotePlayers[data.id];
+                if (remote) updateRemotePlayerWeaponMesh(remote, data.currentWeapon);
             });
 
             socket.on('playerDisconnected', (id) => {
@@ -128,88 +156,233 @@
                 }
             });
 
-            // Listen for bullets fired by your friend
-            socket.on('remoteBulletFired', (bulletData) => {
-                spawnBulletMesh(bulletData.origin, bulletData.direction, bulletData.velocity, 0xff0055);
+            socket.on('remoteBulletFired', (bData) => {
+                spawnBulletMesh(bData.origin, bData.direction, bData.velocity, bData.color, bData.bSize);
             });
 
-            // Input Triggers
+            // Browser Listeners
             blocker.addEventListener('click', () => { document.body.requestPointerLock(); });
             document.addEventListener('pointerlockchange', () => {
                 controlsLocked = (document.pointerLockElement === document.body);
                 blocker.style.display = controlsLocked ? 'none' : 'flex';
+                if(!controlsLocked) mouseButtonDown = false;
             });
 
             document.addEventListener('mousemove', onMouseMove);
             document.addEventListener('keydown', onKeyDown);
             document.addEventListener('keyup', onKeyUp);
             document.addEventListener('mousedown', onMouseDown);
+            document.addEventListener('mouseup', onMouseUp);
             window.addEventListener('resize', onWindowResize);
+            updateHUDText();
         }
 
-        function createRemotePlayerMesh(id, info) {
-            const group = new THREE.Group();
-            const body = new THREE.Mesh(new THREE.BoxGeometry(1.6, 3.2, 1.6), new THREE.MeshStandardMaterial({ color: 0xcc00ff }));
-            body.position.y = 1.6; // Align to stand accurately on floor
-            group.add(body);
+        // DESIGN STRUCT: Modular Realism Character Rigging
+        function createRealisticRemotePlayer(id, info) {
+            const playerGroup = new THREE.Group();
 
-            const visor = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.3, 0.4), new THREE.MeshBasicMaterial({ color: 0x00ffcc }));
-            visor.position.set(0, 2.6, -0.7);
-            group.add(visor);
+            const matArmor = new THREE.MeshStandardMaterial({ color: 0x2e3138, roughness: 0.5, metalness: 0.6 });
+            const matUndersuit = new THREE.MeshStandardMaterial({ color: 0x111113, roughness: 0.8 });
+            const matVisor = new THREE.MeshBasicMaterial({ color: 0x00ffcc });
 
-            group.position.set(info.x, info.y - 2.5, info.z); // offset camera height eye lines
-            scene.add(group);
-            remotePlayers[id] = group;
+            // Torso Base
+            const torso = new THREE.Mesh(new THREE.BoxGeometry(1.4, 1.6, 0.8), matArmor);
+            torso.position.y = 1.7;
+            playerGroup.add(torso);
+
+            // Combat Leg Structures
+            const leftLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 1.8), matUndersuit);
+            leftLeg.position.set(-0.4, 0.9, 0);
+            playerGroup.add(leftLeg);
+
+            const rightLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.15, 1.8), matUndersuit);
+            rightLeg.position.set(0.4, 0.9, 0);
+            playerGroup.add(rightLeg);
+
+            // Tactical Arm Bracers
+            const leftArm = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 1.5), matArmor);
+            leftArm.position.set(-0.9, 2.0, -0.2);
+            leftArm.rotation.x = -Math.PI / 6;
+            playerGroup.add(leftArm);
+
+            const rightArm = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.13, 1.5), matArmor);
+            rightArm.position.set(0.9, 2.0, -0.4);
+            rightArm.rotation.x = -Math.PI / 3; // Positioned forward to grasp weapon rig barrels
+            playerGroup.add(rightArm);
+
+            // Separate Head Node structure for dynamic Pitch looking vectors
+            const headContainer = new THREE.Group();
+            headContainer.name = "headSystem";
+            headContainer.position.set(0, 2.7, 0);
+
+            const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.4, 16, 16), matArmor);
+            headContainer.add(helmet);
+
+            const tacticalVisor = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.18, 0.2), matVisor);
+            tacticalVisor.position.set(0, 0.05, -0.38);
+            headContainer.add(tacticalVisor);
+
+            playerGroup.add(headContainer);
+
+            // Attach dynamic proxy Weapon holder container
+            const weaponHolder = new THREE.Group();
+            weaponHolder.name = "weaponAttachmentContainer";
+            weaponHolder.position.set(0.5, 1.8, -0.4);
+            playerGroup.add(weaponHolder);
+
+            playerGroup.position.set(info.x, info.y - 2.5, info.z);
+            scene.add(playerGroup);
+            remotePlayers[id] = playerGroup;
+
+            // Render current selected weapon geometry profile on spawn
+            updateRemotePlayerWeaponMesh(playerGroup, info.currentWeapon || 1);
         }
 
-        function buildWeaponMesh() {
-            const matMetal = new THREE.MeshStandardMaterial({ color: 0x222, metalness: 0.8 });
-            const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.25), matMetal); receiver.position.set(0.15, -0.2, -0.3); weaponGroup.add(receiver);
-            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.015, 0.015, 0.35), matMetal); barrel.rotation.x = Math.PI/2; barrel.position.set(0.15, -0.19, -0.55); weaponGroup.add(barrel);
+        function updateRemotePlayerWeaponMesh(playerGroup, weaponId) {
+            const holder = playerGroup.getObjectByName("weaponAttachmentContainer");
+            if (!holder) return;
+
+            while(holder.children.length > 0) { holder.remove(holder.children[0]); }
+
+            const cfg = weaponsConfig[weaponId];
+            const barrelMat = new THREE.MeshStandardMaterial({ color: 0x111, metalness: 0.8 });
+            const glowMat = new THREE.MeshBasicMaterial({ color: cfg.color });
+
+            const barrelGeom = new THREE.CylinderGeometry(0.04, 0.04, 0.9);
+            const barrelMesh = new THREE.Mesh(barrelGeom, barrelMat);
+            barrelMesh.rotation.x = Math.PI / 2;
+            barrelMesh.position.set(0, 0, -0.3);
+            holder.add(barrelMesh);
+
+            const emitterMesh = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.2), glowMat);
+            emitterMesh.position.set(0, 0, -0.75);
+            holder.add(emitterMesh);
+        }
+
+        function buildLocalWeaponMesh() {
+            while(weaponGroup.children.length > 0){ weaponGroup.remove(weaponGroup.children[0]); }
+            const cfg = weaponsConfig[currentWeapon];
+            const matMetal = new THREE.MeshStandardMaterial({ color: 0x1e1e24, metalness: 0.7, roughness: 0.3 });
+            const matGlow = new THREE.MeshBasicMaterial({ color: cfg.color });
+
+            const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.08, 0.28), matMetal); receiver.position.set(0.16, -0.2, -0.35); weaponGroup.add(receiver);
+            const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, 0.45), matMetal); barrel.rotation.x = Math.PI/2; barrel.position.set(0.16, -0.19, -0.65); weaponGroup.add(barrel);
+            const glowCore = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.04, 0.15), matGlow); glowCore.position.set(0.16, -0.17, -0.4); weaponGroup.add(glowCore);
         }
 
         function onMouseMove(event) {
             if (!controlsLocked) return;
             yaw -= (event.movementX || 0) * 0.0022;
             pitch -= (event.movementY || 0) * 0.0022;
-            pitch = Math.max(-Math.PI / 2.2, Math.min(Math.PI / 2.2, pitch));
+            pitch = Math.max(-Math.PI / 2.3, Math.min(Math.PI / 2.3, pitch));
             camera.quaternion.setFromEuler(new THREE.Euler(pitch, yaw, 0, 'YXZ'));
         }
 
-        function onMouseDown(event) {
-            if (!controlsLocked || event.button !== 0) return;
-            
-            const now = performance.now();
-            if (now - lastShotTime < fireRate) return;
-            lastShotTime = now;
+        function swapWeapon(index) {
+            if (isReloading || currentWeapon === index) return;
+            currentWeapon = index;
+            semiAutoShotFired = false;
+            updateHUDText();
+            buildLocalWeaponMesh();
 
-            // Generate direction vector based on player look angle
-            const camDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
-            const bulletVelocity = 110; 
-            
-            // Define starting point slightly ahead of player camera
-            const originPoint = camera.position.clone().addScaledVector(camDirection, 0.5);
-
-            // Spawn local bullet element
-            spawnBulletMesh(originPoint, camDirection, bulletVelocity, 0x00ffcc);
-
-            // Send shot events straight out to server sockets
+            // Notify server to change model mesh on friend's screen
             if (socket && socket.connected) {
-                socket.emit('shootBullet', {
-                    origin: { x: originPoint.x, y: originPoint.y, z: originPoint.z },
-                    direction: { x: camDirection.x, y: camDirection.y, z: camDirection.z },
-                    velocity: bulletVelocity
-                });
+                socket.emit('weaponChange', { currentWeapon: currentWeapon });
             }
         }
 
-        function spawnBulletMesh(origin, direction, speed, colorHex) {
-            const bMesh = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 8), new THREE.MeshBasicMaterial({ color: colorHex }));
-            bMesh.position.set(origin.x, origin.y, origin.z);
-            scene.add(bMesh);
+        function reloadActiveWeapon() {
+            const cfg = weaponsConfig[currentWeapon];
+            if (isReloading || cfg.currentAmmo === cfg.maxAmmo) return;
+
+            isReloading = true;
+            document.getElementById('reload-msg').style.display = "block";
+            weaponGroup.position.y = -0.4; 
+
+            setTimeout(() => {
+                cfg.currentAmmo = cfg.maxAmmo;
+                isReloading = false;
+                document.getElementById('reload-msg').style.display = "none";
+                weaponGroup.position.y = 0; 
+                updateHUDText();
+            }, cfg.reloadTime);
+        }
+
+        function updateHUDText() {
+            const cfg = weaponsConfig[currentWeapon];
+            const modeStr = cfg.auto ? " (AUTO)" : " (SEMI)";
+            document.getElementById('weapon-display').innerText = "WEAPON: " + cfg.name + modeStr;
+            document.getElementById('ammo-display').innerText = "AMMO: " + cfg.currentAmmo + " / " + cfg.maxAmmo;
+        }
+
+        function onMouseDown(event) {
+            if (controlsLocked && event.button === 0) mouseButtonDown = true;
+        }
+
+        function onMouseUp(event) {
+            if (event.button === 0) {
+                mouseButtonDown = false;
+                semiAutoShotFired = false;
+            }
+        }
+
+        function executeAttackLoop() {
+            const now = performance.now();
+            const cfg = weaponsConfig[currentWeapon];
+
+            if (isReloading || (now - lastShotTime < cfg.fireRate)) return;
+            if (!cfg.auto && semiAutoShotFired) return;
+
+            if (cfg.currentAmmo <= 0) {
+                reloadActiveWeapon();
+                return;
+            }
+
+            cfg.currentAmmo--;
+            updateHUDText();
+            lastShotTime = now;
+            if (!cfg.auto) semiAutoShotFired = true;
+
+            gunRecoilZ = 0.12; 
+
+            const camDirection = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).normalize();
+            const spawnOrigin = camera.position.clone().addScaledVector(camDirection, 0.6);
+
+            for (let i = 0; i < cfg.count; i++) {
+                let currentDir = camDirection.clone();
+                if (currentWeapon === 2) { // Spread simulation calculation
+                    currentDir.x += (Math.random() - 0.5) * 0.14;
+                    currentDir.y += (Math.random() - 0.5) * 0.14;
+                    currentDir.z += (Math.random() - 0.5) * 0.14;
+                    currentDir.normalize();
+                }
+
+                // Fire local tracking asset object
+                spawnBulletMesh(spawnOrigin, currentDir, cfg.velocity, cfg.color, cfg.bSize);
+
+                // Instantly emit vector details out over sockets pipeline 
+                if (socket && socket.connected) {
+                    socket.emit('shootBullet', {
+                        origin: { x: spawnOrigin.x, y: spawnOrigin.y, z: spawnOrigin.z },
+                        direction: { x: currentDir.x, y: currentDir.y, z: currentDir.z },
+                        velocity: cfg.velocity,
+                        color: cfg.color,
+                        bSize: cfg.bSize
+                    });
+                }
+            }
+        }
+
+        function spawnBulletMesh(origin, direction, speed, colorHex, size) {
+            const bulletMesh = new THREE.Mesh(
+                new THREE.SphereGeometry(size, 8, 8),
+                new THREE.MeshBasicMaterial({ color: colorHex })
+            );
+            bulletMesh.position.set(origin.x, origin.y, origin.z);
+            scene.add(bulletMesh);
 
             bullets.push({
-                mesh: bMesh,
+                mesh: bulletMesh,
                 velocity: new THREE.Vector3(direction.x, direction.y, direction.z).multiplyScalar(speed),
                 aliveTime: 0
             });
@@ -222,9 +395,14 @@
                 case 'KeyS': moveBackward = true; break;
                 case 'KeyD': moveRight = true; break;
                 case 'Space': 
-                    if (canJump) velocity.y += 13.5; // Upward impulse force
-                    canJump = false;
+                    if (canJump) velocity.y += 14.5; 
+                    canJump = false; 
                     break;
+                case 'KeyR': reloadActiveWeapon(); break;
+                case 'Digit1': swapWeapon(1); break;
+                case 'Digit2': swapWeapon(2); break;
+                case 'Digit3': swapWeapon(3); break;
+                case 'Digit4': swapWeapon(4); break;
             }
         }
 
@@ -249,31 +427,33 @@
             const delta = (time - prevTime) / 1000;
 
             if (controlsLocked) {
-                // Movement damping
+                if (mouseButtonDown) executeAttackLoop();
+
+                gunRecoilZ = THREE.MathUtils.lerp(gunRecoilZ, 0, 12 * delta);
+                weaponGroup.position.z = gunRecoilZ;
+
                 velocity.x -= velocity.x * 10.0 * delta;
                 velocity.z -= velocity.z * 10.0 * delta;
-                
-                // Gravity acceleration engine
-                velocity.y -= 9.81 * 3.8 * delta; 
+                velocity.y -= 9.81 * 3.8 * delta; // Gravity system
 
                 const lookEuler = new THREE.Euler(0, yaw, 0, 'YXZ');
                 const forwardDirection = new THREE.Vector3(0, 0, -1).applyEuler(lookEuler);
                 const rightDirection = new THREE.Vector3(1, 0, 0).applyEuler(lookEuler);
 
-                if (moveForward) velocity.addScaledVector(forwardDirection, 140.0 * delta);
-                if (moveBackward) velocity.addScaledVector(forwardDirection, -140.0 * delta);
-                if (moveLeft) velocity.addScaledVector(rightDirection, -140.0 * delta);
-                if (moveRight) velocity.addScaledVector(rightDirection, 140.0 * delta);
+                if (moveForward) velocity.addScaledVector(forwardDirection, 145.0 * delta);
+                if (moveBackward) velocity.addScaledVector(forwardDirection, -145.0 * delta);
+                if (moveLeft) velocity.addScaledVector(rightDirection, -145.0 * delta);
+                if (moveRight) velocity.addScaledVector(rightDirection, 145.0 * delta);
 
                 const oldPosition = camera.position.clone();
                 camera.position.addScaledVector(velocity, delta);
 
-                // Map Barrier Collisions
+                // Outer bounds protection collisions mechanics
                 for (let m = 0; m < wallMeshes.length; m++) {
                     const wallBox = new THREE.Box3().setFromObject(wallMeshes[m]);
                     const playerBox = new THREE.Box3(
                         new THREE.Vector3(camera.position.x - PLAYER_RADIUS, 0, camera.position.z - PLAYER_RADIUS),
-                        new THREE.Vector3(camera.position.x + PLAYER_RADIUS, 8, camera.position.z + PLAYER_RADIUS)
+                        new THREE.Vector3(camera.position.x + PLAYER_RADIUS, 10, camera.position.z + PLAYER_RADIUS)
                     );
                     if (wallBox.intersectsBox(playerBox)) {
                         camera.position.x = oldPosition.x;
@@ -282,32 +462,31 @@
                     }
                 }
 
-                // Landing check physics logic 
                 if (camera.position.y < 2.5) {
                     velocity.y = 0;
                     camera.position.y = 2.5;
                     canJump = true;
                 }
 
-                // Broadcast local coordinates to backend
+                // Broadcast fully structured movement packet vectors out to network
                 if (socket && socket.connected) {
                     socket.emit('playerMovement', {
                         x: camera.position.x,
                         y: camera.position.y,
                         z: camera.position.z,
-                        yaw: yaw
+                        yaw: yaw,
+                        pitch: pitch
                     });
                 }
             }
 
-            // Bullet flight mechanics tracking loop
+            // Projectile flight transformation tracking update loops
             for (let i = bullets.length - 1; i >= 0; i--) {
                 const b = bullets[i];
                 b.mesh.position.addScaledVector(b.velocity, delta);
                 b.aliveTime += delta;
 
-                // Strip out old bullets or ground collisions after 3 seconds
-                if (b.aliveTime > 3.0 || b.mesh.position.y <= 0) {
+                if (b.aliveTime > 2.5 || b.mesh.position.y <= 0) {
                     scene.remove(b.mesh);
                     bullets.splice(i, 1);
                 }
